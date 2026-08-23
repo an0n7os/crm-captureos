@@ -1,0 +1,207 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+   Design tokens. Light palette on :root, dark overrides under .dark so the
+   theme toggle and the OS preference both resolve to the same variables.
+--------------------------------------------------------------------------- */
+
+:root {
+  --background: #f5f6fa;
+  --foreground: #14161f;
+
+  --card: #ffffff;
+  --card-foreground: #14161f;
+
+  --popover: #ffffff;
+  --popover-foreground: #14161f;
+
+  --primary: #4f46e5;
+  --primary-foreground: #ffffff;
+  --primary-soft: #eef2ff;
+
+  --secondary: #f1f2f7;
+  --secondary-foreground: #2c3040;
+
+  --muted: #f1f2f7;
+  --muted-foreground: #6b7186;
+
+  --accent: #eef2ff;
+  --accent-foreground: #3730a3;
+
+  --success: #059669;
+  --success-soft: #ecfdf5;
+  --warning: #d97706;
+  --warning-soft: #fffbeb;
+  --danger: #dc2626;
+  --danger-soft: #fef2f2;
+  --info: #0284c7;
+  --info-soft: #f0f9ff;
+
+  --border: #e5e7ef;
+  --input: #e5e7ef;
+  --ring: #4f46e5;
+
+  --sidebar: #171a2b;
+  --sidebar-foreground: #c8cbdb;
+  --sidebar-muted: #767c99;
+  --sidebar-active: #262a44;
+  --sidebar-active-foreground: #ffffff;
+  --sidebar-border: #262a40;
+
+  --radius: 0.75rem;
+}
+
+.dark {
+  --background: #0d0f18;
+  --foreground: #e8eaf2;
+
+  --card: #151823;
+  --card-foreground: #e8eaf2;
+
+  --popover: #191d2a;
+  --popover-foreground: #e8eaf2;
+
+  --primary: #7c74f0;
+  --primary-foreground: #ffffff;
+  --primary-soft: #1e1f3d;
+
+  --secondary: #1e2130;
+  --secondary-foreground: #d3d6e3;
+
+  --muted: #1e2130;
+  --muted-foreground: #9096ad;
+
+  --accent: #232645;
+  --accent-foreground: #c7c3ff;
+
+  --success: #34d399;
+  --success-soft: #0d2a22;
+  --warning: #fbbf24;
+  --warning-soft: #2b2110;
+  --danger: #f87171;
+  --danger-soft: #2d1517;
+  --info: #38bdf8;
+  --info-soft: #0c2231;
+
+  --border: #262a3a;
+  --input: #2c3042;
+  --ring: #7c74f0;
+
+  --sidebar: #10121c;
+  --sidebar-foreground: #b9bdd0;
+  --sidebar-muted: #6f7590;
+  --sidebar-active: #1e2233;
+  --sidebar-active-foreground: #ffffff;
+  --sidebar-border: #21253440;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-soft: var(--primary-soft);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-muted: var(--sidebar-muted);
+  --color-sidebar-active: var(--sidebar-active);
+  --color-sidebar-active-foreground: var(--sidebar-active-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 0.25rem);
+  --radius-sm: calc(var(--radius) - 0.375rem);
+  --radius-xl: calc(var(--radius) + 0.25rem);
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Tabular figures keep money columns aligned across rows. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  ::selection {
+    background-color: var(--primary);
+    color: var(--primary-foreground);
+  }
+}
+
+/* Printing a shared document should produce a clean, ink-light page. */
+@media print {
+  :root {
+    --background: #ffffff;
+    --card: #ffffff;
+    --foreground: #14161f;
+    --muted-foreground: #4b5060;
+    --border: #d8dae4;
+  }
+
+  html,
+  body {
+    background: #ffffff !important;
+  }
+
+  @page {
+    margin: 14mm;
+  }
+
+  /* Keep an itinerary block from splitting across a page break. */
+  li,
+  table,
+  dl {
+    break-inside: avoid;
+  }
+}
+
+@layer utilities {
+  .scrollbar-slim {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+
+  .scrollbar-slim::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .scrollbar-slim::-webkit-scrollbar-thumb {
+    background-color: var(--border);
+    border-radius: 9999px;
+  }
+
+  .scrollbar-slim::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}

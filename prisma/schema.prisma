@@ -1,0 +1,1084 @@
+// Studio OS — multi-tenant CRM for wedding & event production studios.
+// Every tenant-owned row carries `studioId`; all queries must scope by it.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Tenancy & identity
+// ---------------------------------------------------------------------------
+
+enum PlanTier {
+  FREE
+  STUDIO
+  AGENCY
+}
+
+enum Role {
+  OWNER
+  ADMIN
+  MANAGER
+  EDITOR
+  MEMBER
+}
+
+model Studio {
+  id          String  @id @default(cuid())
+  name        String
+  slug        String  @unique
+  // Branding + locale, surfaced in the client portal and on documents.
+  logoUrl     String?
+  brandHex    String  @default("#4F46E5")
+  currency    String  @default("INR")
+  timezone    String  @default("Asia/Kolkata")
+  gstNumber   String?
+  phone       String?
+  email       String?
+  website     String?
+  addressLine String?
+  city        String?
+  state       String?
+  pincode     String?
+
+  whatsappNumber String?
+
+  // Public lead-capture page: /lead/<enquirySlug>
+  enquirySlug     String? @unique
+  enquiryEnabled  Boolean @default(true)
+  enquiryCoverUrl String?
+  enquiryHeading  String?
+  enquirySubtext  String?
+
+  plan         PlanTier  @default(FREE)
+  planRenewsAt DateTime?
+  onboardedAt  DateTime?
+  referralCode String?   @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users                User[]
+  clients              Client[]
+  enquiries            Enquiry[]
+  packages             Package[]
+  quotations           Quotation[]
+  projects             Project[]
+  eventDays            EventDay[]
+  deliverables         Deliverable[]
+  crewMembers          CrewMember[]
+  crewAssignments      CrewAssignment[]
+  crewUnavailability   CrewUnavailability[]
+  postTasks            PostTask[]
+  taskVersions         TaskVersion[]
+  clientRequests       ClientRequest[]
+  requestComments      RequestComment[]
+  invoices             Invoice[]
+  payments             Payment[]
+  expenses             Expense[]
+  payouts              Payout[]
+  notifications        Notification[]
+  activities           Activity[]
+  deliverableTemplates DeliverableTemplate[]
+  contracts            Contract[]
+  moodboardItems       MoodboardItem[]
+  leadPageViews        LeadPageView[]
+  serviceItems         ServiceItem[]
+
+  @@index([slug])
+}
+
+model User {
+  id       String @id @default(cuid())
+  studioId String
+  studio   Studio @relation(fields: [studioId], references: [id], onDelete: Cascade)
+
+  name         String
+  email        String
+  passwordHash String
+  avatarUrl    String?
+  phone        String?
+  role         Role      @default(MEMBER)
+  isActive     Boolean   @default(true)
+  lastLoginAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  crewProfile      CrewMember?
+  ownedEnquiries   Enquiry[]        @relation("EnquiryOwner")
+  managedProjects  Project[]        @relation("ProjectManager")
+  assignedTasks    PostTask[]       @relation("TaskAssignee")
+  uploadedVersions TaskVersion[]
+  activities       Activity[]
+  notifications    Notification[]
+  requestComments  RequestComment[]
+
+  // Email is unique per studio, not globally — the same person may belong to two studios.
+  @@unique([studioId, email])
+  @@index([studioId])
+}
+
+// ---------------------------------------------------------------------------
+// Clients & enquiries (lead pipeline)
+// ---------------------------------------------------------------------------
+
+model Client {
+  id       String @id @default(cuid())
+  studioId String
+  studio   Studio @relation(fields: [studioId], references: [id], onDelete: Cascade)
+
+  name        String
+  partnerName String?
+  email       String?
+  phone       String?
+  altPhone    String?
+  city        String?
+  addressLine String?
+  instagram   String?
+  notes       String?
+  // Stable random token so a client can open their portal without an account.
+  portalToken String  @unique @default(cuid())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  enquiries      Enquiry[]
+  projects       Project[]
+  quotations     Quotation[]
+  invoices       Invoice[]
+  clientRequests ClientRequest[]
+
+  @@index([studioId])
+  @@index([studioId, name])
+}
+
+enum EnquiryStatus {
+  NEW
+  CONTACTED
+  FOLLOW_UP
+  QUOTED
+  REVISE
+  WON
+  LOST
+}
+
+enum EnquirySource {
+  INSTAGRAM
+  FACEBOOK
+  GOOGLE
+  REFERRAL
+  WEBSITE
+  WALK_IN
+  WHATSAPP
+  VENDOR
+  OTHER
+}
+
+model Enquiry {
+  id       String @id @default(cuid())
+  studioId String
+  studio   Studio @relation(fields: [studioId], references: [id], onDelete: Cascade)
+
+  clientId String?
+  client   Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+
+  // Captured before a Client record exists, so contact fields live here too.
+  contactName String
+  partnerName String?
+  phone       String?
+  email       String?
+  city        String?
+
+  eventType  EventType @default(WEDDING)
+  eventDate  DateTime?
+  venue      String?
+  guestCount Int?
+  budgetMin  Decimal?  @db.Decimal(12, 2)
+  budgetMax  Decimal?  @db.Decimal(12, 2)
+
+  status     EnquiryStatus @default(NEW)
+  source     EnquirySource @default(OTHER)
+  notes      String?
+  lostReason String?
+
+  nextFollowUpAt DateTime?
+  contactedAt    DateTime?
+  closedAt       DateTime?
+
+  ownerId String?
+  owner   User?   @relation("EnquiryOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  quotations Quotation[]
+  project    Project?
+
+  @@index([studioId])
+  @@index([studioId, status])
+  @@index([studioId, nextFollowUpAt])
+}
+
+// ---------------------------------------------------------------------------
+// Packages & quotations
+// ---------------------------------------------------------------------------
+
+model Package {
+  id       String @id @default(cuid())
+  studioId String
+  studio   Studio @relation(fields: [studioId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String?
+  price       Decimal  @db.Decimal(12, 2)
+  // Free-form list of what the package covers, rendered on quotations.
+  inclusions  String[]
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([studioId])
+}
+
+enum QuotationStatus {
+  DRAFT
+  SENT
+  VIEWED
+  ACCEPTED
+  REJECTED
+  EXPIRED
+}
+
+model Quotation {
+  id       String @id @default(cuid())
+  studioId String
+  studio   Studio @relation(fields: [studioId], references: [id], onDelete: Cascade)
+
+  enquiryId String?
+  enquiry   Enquiry? @relation(fields: [enquiryId], references: [id], onDelete: SetNull)
+  clientId  String?
+  client    Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
+
+  number String
+  title  String?
+  status QuotationStatus @default(DRAFT)
+
+  subtotal   Decimal @default(0) @db.Decimal(12, 2)
+  discount   Decimal @default(0) @db.Decimal(12, 2)
+  taxPercent Decimal @default(0) @db.Decimal(5, 2)
+  taxAmount  Decimal @default(0) @db.Decimal(12, 2)
+  total      Decimal @default(0) @db.Decimal(12, 2)
+
+  // Money actually collected against the quote, before any invoice exists.
+  amountPaid Decimal @default(0) @db.Decimal(12, 2)
+
+  // Free-text blocks shown as tabs on the quote.
+  deliverablesText  String?
+  complimentaryText String?
+
+  // Name shown on the document when no Client record exists yet.
+  leadName     String?
+  showLeadName Boolean @default(true)
+  showDates    Boolean @default(true)
+  pdfTemplate  String  @default("CLASSIC")
+
+  notes       String?
+  terms       String?
+  validUntil  DateTime?
+  sentAt      DateTime?
+  respondedAt DateTime?
+  // Public token so the quote can be viewed without login.
+  shareToken  String    @unique @default(cuid())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items    QuotationItem[]
+  events   QuotationEvent[]
+  payments QuotationPayment[]
+
+  @@unique([studioId, number])
+  @@index([studioId])
+  @@index([studioId, status])
+}
+
+/**
+ * One day of the shoot inside a quotation's itinerary.
+ */
+model QuotationEvent {
+  id          String    @id @default(cuid())
+  quotationId String
+  quotation   Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+
+  name          String
+  venue         String?
+  date          DateTime?
+  dateConfirmed Boolean   @default(false)
+  sortOrder     Int       @default(0)
+
+  services QuotationEventService[]
+
+  @@index([quotationId])
+}
+
+/**
+ * A crew role booked for one itinerary event, e.g. 2 candid photographers.
+ */
+model QuotationEventService {
+  id      String         @id @default(cuid())
+  eventId String
+  event   QuotationEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  name      String
+  quantity  Int     @default(1)
+  unitPrice Decimal @default(0) @db.Decimal(12, 2)
+  sortOrder Int     @default(0)
+
+  @@index([eventId])
+}
+
+model QuotationPayment {
+  id          String    @id @default(cuid())
+  studioId    String
+  quotationId String
+  quotation   Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+
+  amount    Decimal       @db.Decimal(12, 2)
+  method    PaymentMethod @default(UPI)
+  paidOn    DateTime      @default(now())
+  reference String?
+  note      String?
+
+  createdAt DateTime @default(now())
+
+  @@index([quotationId])
+  @@index([studioId])
+}
+
+/**
+ * Reusable crew-role list the quotation builder picks from.
+ */
+model ServiceItem {
+  id       String @id @default(cuid())
+  studioId String
+  studio   Studio @relation(fields: [studioId], references: [id], onDelete: Cascade)
+
+  name      String
+  unitPrice Decimal @default(0) @db.Decimal(12, 2)
+  isActive  Boolean @default(true)
+  sortOrder Int     @default(0)
+
+  createdAt DateTime @default(now())
+
+  @@unique([studioId, name])
+  @@index([studioId])
+}
+
+model QuotationItem {
+  id          String    @id @default(cuid())
+  quotationId String
+  quotation   Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String?
+  quantity    Int     @default(1)
+  unitPrice   Decimal @db.Decimal(12, 2)
+  amount      Decimal @db.Decimal(12, 2)
+  sortOrder   Int     @default(0)
+
+  @@index([quotationId])
+}
+
+// ---------------------------------------------------------------------------
+// Projects & event days
+// ---------------------------------------------------------------------------
+
+enum EventType {
+  WEDDING
+  ENGAGEMENT
+  HALDI
+  MEHNDI
+  RECEPTION
+  SAVE_THE_DATE
+  PRE_WEDDING
+  BIRTHDAY
+  CORPORATE
+  BABY_SHOWER
+  HOUSE_WARMING
+  OTHER
+}
+
+enum ProjectStatus {
+  UPCOMING
+  IN_PROGRESS
+  SHOOT_DONE
+  POST_PRODUCTION
+  DELIVERED
+  COMPLETED
+  CANCELLED
+}
+
+model Project {
+  id       String @id @default(cuid())
+  studioId String
+  studio   Studio @relation(fields: [studioId], references: [id], onDelete: Cascade)
+
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  // A project is created from a won enquiry; the link is kept for funnel reporting.
+  enquiryId String?  @unique
+  enquiry   Enquiry? @relation(fields: [enquiryId], references: [id], onDelete: SetNull)
+
+  code      String
+  name      String
+  eventType EventType     @default(WEDDING)
+  status    ProjectStatus @default(UPCOMING)
+  // Denormalised from the earliest/latest EventDay for cheap list sorting.
+  startDate DateTime?
+  endDate   DateTime?
+  venue     String?
+  city      String?
+
+  packageValue Decimal @default(0) @db.Decimal(12, 2)
+  notes        String?
+
+  clientWhatsapp   String?
+  whatsappGroupUrl String?
+
+  // Per-project client link. The PIN gates it; blank means no PIN required.
+  shareToken String  @unique @default(cuid())
+  portalPin  String?
+
+  managerId String?
+  manager   User?   @relation("ProjectManager", fields: [managerId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  eventDays      EventDay[]
+  deliverables   Deliverable[]
+  postTasks      PostTask[]
+  clientRequests ClientRequest[]
+  invoices       Invoice[]
+  expenses       Expense[]
+  payouts        Payout[]
+  contract       Contract?
+  moodboardItems MoodboardItem[]
+
+  @@unique([studioId, code])
+  @@index([studioId])
+  @@index([studioId, status])
+  @@index([studioId, startDate])
+}
+
+model EventDay {
+  id        String  @id @default(cuid())
+  studioId  String
+  studio    Studio  @relation(fields: [studioId], references: [id], onDelete: Cascade)
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  title     String
+  eventType EventType @default(WEDDING)
+  date      DateTime
+  startTime String?
+  endTime   String?
+  venue     String?
+  city      String?
+  mapUrl    String?
+  notes     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  assignments CrewAssignment[]
+
+  @@index([studioId])
+  @@index([studioId, date])
+  @@index([projectId])
+}
+
+// ---------------------------------------------------------------------------
+// Deliverables
+// ---------------------------------------------------------------------------
+
+enum DeliverableStatus {
+  PENDING
+  IN_PROGRESS
+  REVIEW
+  APPROVED
+  DELIVERED
+}
+
+model DeliverableTemplate {
+  id       String @id @default(cuid())
+  studioId String
+  studio   Studio @relation(fields: [studioId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String?
+  // Default turnaround used to auto-fill a deliverable due date.
+  dueInDays   Int     @default(30)
+  sortOrder   Int     @default(0)
+  isActive    Boolean @default(true)
+
+  createdAt DateTime @default(now())
+
+  @@index([studioId])
+}
+
+model Deliverable {
+  id        String  @id @default(cuid())
+  studioId  String
+  studio    Studio  @relation(fields: [studioId], references: [id], onDelete: Cascade)
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String?
+  quantity    Int               @default(1)
+  status      DeliverableStatus @default(PENDING)
+  dueDate     DateTime?
+  deliveredAt DateTime?
+  deliveryUrl String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  postTasks PostTask[]
+
+  @@index([studioId])
+  @@index([projectId])
+  @@index([studioId, dueDate])
+}
+
+// ---------------------------------------------------------------------------
+// Crew
+// ---------------------------------------------------------------------------
+
+enum CrewType {
+  IN_HOUSE
+  FREELANCER
+}
+
+enum CrewRole {
+  PHOTOGRAPHER
+  CINEMATOGRAPHER
+  DRONE_PILOT
+  ASSISTANT
+  EDITOR
+  ALBUM_DESIGNER
+  COLORIST
+  MAKEUP
+  COORDINATOR
+  OTHER
+}
+
+model CrewMember {
+  id       String @id @default(cuid())
+  studioId String
+  studio   Studio @relation(fields: [studioId], references: [id], onDelete: Cascade)
+
+  // Present only when the crew member also logs into the app.
+  userId String? @unique
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  name     String
+  phone    String?
+  email    String?
+  city     String?
+  type     CrewType @default(IN_HOUSE)
+  role     CrewRole @default(PHOTOGRAPHER)
+  skills   String[]
+  dayRate  Decimal? @db.Decimal(12, 2)
+  isActive Boolean  @default(true)
+  notes    String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  assignments    CrewAssignment[]
+  unavailability CrewUnavailability[]
+  payouts        Payout[]
+
+  @@index([studioId])
+  @@index([studioId, type])
+}
+
+enum AssignmentStatus {
+  TENTATIVE
+  CONFIRMED
+  DECLINED
+  COMPLETED
+}
+
+model CrewAssignment {
+  id       String @id @default(cuid())
+  studioId String
+  studio   Studio @relation(fields: [studioId], references: [id], onDelete: Cascade)
+
+  eventDayId String
+  eventDay   EventDay   @relation(fields: [eventDayId], references: [id], onDelete: Cascade)
+  crewId     String
+  crew       CrewMember @relation(fields: [crewId], references: [id], onDelete: Cascade)
+
+  role      CrewRole         @default(PHOTOGRAPHER)
+  status    AssignmentStatus @default(TENTATIVE)
+  callTime  String?
+  agreedFee Decimal?         @db.Decimal(12, 2)
+  notes     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // A crew member is booked at most once per event day.
+  @@unique([eventDayId, crewId])
+  @@index([studioId])
+  @@index([crewId])
+}
+
+model CrewUnavailability {
+  id       String     @id @default(cuid())
+  studioId String
+  studio   Studio     @relation(fields: [studioId], references: [id], onDelete: Cascade)
+  crewId   String
+  crew     CrewMember @relation(fields: [crewId], references: [id], onDelete: Cascade)
+
+  startDate DateTime
+  endDate   DateTime
+  reason    String?
+
+  createdAt DateTime @default(now())
+
+  @@index([studioId])
+  @@index([crewId, startDate])
+}
+
+// ---------------------------------------------------------------------------
+// Post production
+// ---------------------------------------------------------------------------
+
+enum PostStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  REVIEW
+  CHANGES_REQUESTED
+  APPROVED
+  DELIVERED
+}
+
+enum Priority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+model PostTask {
+  id        String  @id @default(cuid())
+  studioId  String
+  studio    Studio  @relation(fields: [studioId], references: [id], onDelete: Cascade)
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  deliverableId String?
+  deliverable   Deliverable? @relation(fields: [deliverableId], references: [id], onDelete: SetNull)
+
+  title       String
+  description String?
+  status      PostStatus @default(NOT_STARTED)
+  priority    Priority   @default(NORMAL)
+  dueDate     DateTime?
+  startedAt   DateTime?
+  completedAt DateTime?
+  // Kanban ordering within a status column.
+  sortOrder   Int        @default(0)
+
+  assigneeId String?
+  assignee   User?   @relation("TaskAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  versions       TaskVersion[]
+  clientRequests ClientRequest[]
+
+  @@index([studioId])
+  @@index([studioId, status])
+  @@index([projectId])
+}
+
+model TaskVersion {
+  id       String   @id @default(cuid())
+  studioId String
+  studio   Studio   @relation(fields: [studioId], references: [id], onDelete: Cascade)
+  taskId   String
+  task     PostTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  version  Int
+  // Deliveries are shared as links (Drive/WeTransfer/Vimeo) rather than uploads.
+  url      String?
+  note     String?
+  isShared Boolean @default(false)
+
+  uploadedById String?
+  uploadedBy   User?   @relation(fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@unique([taskId, version])
+  @@index([studioId])
+}
+
+// ---------------------------------------------------------------------------
+// Client requests (revisions)
+// ---------------------------------------------------------------------------
+
+enum RequestStatus {
+  NEW
+  PENDING
+  IN_PROGRESS
+  RESOLVED
+  REJECTED
+}
+
+model ClientRequest {
+  id       String @id @default(cuid())
+  studioId String
+  studio   Studio @relation(fields: [studioId], references: [id], onDelete: Cascade)
+
+  projectId String
+  project   Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  clientId  String?
+  client    Client?   @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  taskId    String?
+  task      PostTask? @relation(fields: [taskId], references: [id], onDelete: SetNull)
+
+  title       String
+  description String?
+  status      RequestStatus @default(NEW)
+  priority    Priority      @default(NORMAL)
+  // True when raised by the client through the portal rather than by staff.
+  fromPortal  Boolean       @default(false)
+  resolvedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  comments RequestComment[]
+
+  @@index([studioId])
+  @@index([studioId, status])
+  @@index([projectId])
+}
+
+model RequestComment {
+  id        String        @id @default(cuid())
+  studioId  String
+  studio    Studio        @relation(fields: [studioId], references: [id], onDelete: Cascade)
+  requestId String
+  request   ClientRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+
+  body       String
+  // Staff comments carry an authorId; portal comments record the client's name instead.
+  authorId   String?
+  author     User?   @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  authorName String?
+  fromPortal Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@index([requestId])
+  @@index([studioId])
+}
+
+// ---------------------------------------------------------------------------
+// Finances
+// ---------------------------------------------------------------------------
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PARTIAL
+  PAID
+  OVERDUE
+  CANCELLED
+}
+
+model Invoice {
+  id       String @id @default(cuid())
+  studioId String
+  studio   Studio @relation(fields: [studioId], references: [id], onDelete: Cascade)
+
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  clientId  String
+  client    Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  number String
+  title  String?
+  status InvoiceStatus @default(DRAFT)
+
+  subtotal   Decimal @default(0) @db.Decimal(12, 2)
+  discount   Decimal @default(0) @db.Decimal(12, 2)
+  taxPercent Decimal @default(0) @db.Decimal(5, 2)
+  taxAmount  Decimal @default(0) @db.Decimal(12, 2)
+  total      Decimal @default(0) @db.Decimal(12, 2)
+  // Maintained from Payment rows so lists can sort by outstanding balance.
+  amountPaid Decimal @default(0) @db.Decimal(12, 2)
+
+  issueDate  DateTime  @default(now())
+  dueDate    DateTime?
+  sentAt     DateTime?
+  paidAt     DateTime?
+  notes      String?
+  terms      String?
+  shareToken String    @unique @default(cuid())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items    InvoiceItem[]
+  payments Payment[]
+
+  @@unique([studioId, number])
+  @@index([studioId])
+  @@index([studioId, status])
+  @@index([studioId, dueDate])
+}
+
+model InvoiceItem {
+  id        String  @id @default(cuid())
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String?
+  quantity    Int     @default(1)
+  unitPrice   Decimal @db.Decimal(12, 2)
+  amount      Decimal @db.Decimal(12, 2)
+  sortOrder   Int     @default(0)
+
+  @@index([invoiceId])
+}
+
+enum PaymentMethod {
+  CASH
+  UPI
+  BANK_TRANSFER
+  CARD
+  CHEQUE
+  OTHER
+}
+
+model Payment {
+  id       String @id @default(cuid())
+  studioId String
+  studio   Studio @relation(fields: [studioId], references: [id], onDelete: Cascade)
+
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  amount    Decimal       @db.Decimal(12, 2)
+  method    PaymentMethod @default(UPI)
+  paidOn    DateTime      @default(now())
+  reference String?
+  note      String?
+
+  createdAt DateTime @default(now())
+
+  @@index([studioId])
+  @@index([invoiceId])
+}
+
+enum ExpenseCategory {
+  EQUIPMENT
+  TRAVEL
+  FOOD
+  ACCOMMODATION
+  FREELANCER
+  ALBUM_PRINTING
+  SOFTWARE
+  MARKETING
+  RENT
+  SALARY
+  OTHER
+}
+
+model Expense {
+  id       String @id @default(cuid())
+  studioId String
+  studio   Studio @relation(fields: [studioId], references: [id], onDelete: Cascade)
+
+  projectId String?
+  project   Project? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  title      String
+  category   ExpenseCategory @default(OTHER)
+  amount     Decimal         @db.Decimal(12, 2)
+  spentOn    DateTime        @default(now())
+  vendor     String?
+  method     PaymentMethod   @default(CASH)
+  note       String?
+  receiptUrl String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([studioId])
+  @@index([studioId, spentOn])
+  @@index([projectId])
+}
+
+enum PayoutStatus {
+  PENDING
+  PAID
+}
+
+model Payout {
+  id       String @id @default(cuid())
+  studioId String
+  studio   Studio @relation(fields: [studioId], references: [id], onDelete: Cascade)
+
+  crewId    String
+  crew      CrewMember @relation(fields: [crewId], references: [id], onDelete: Cascade)
+  projectId String?
+  project   Project?   @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  amount Decimal       @db.Decimal(12, 2)
+  status PayoutStatus  @default(PENDING)
+  paidOn DateTime?
+  method PaymentMethod @default(UPI)
+  note   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([studioId])
+  @@index([crewId])
+}
+
+// ---------------------------------------------------------------------------
+// Notifications & audit trail
+// ---------------------------------------------------------------------------
+
+model Notification {
+  id       String @id @default(cuid())
+  studioId String
+  studio   Studio @relation(fields: [studioId], references: [id], onDelete: Cascade)
+
+  // Null userId means the notification is for everyone in the studio.
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  title  String
+  body   String?
+  href   String?
+  isRead Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@index([studioId, userId, isRead])
+}
+
+model Activity {
+  id       String @id @default(cuid())
+  studioId String
+  studio   Studio @relation(fields: [studioId], references: [id], onDelete: Cascade)
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  // e.g. "enquiry.created", "invoice.paid" — paired with the row it happened to.
+  action     String
+  entityType String
+  entityId   String
+  summary    String?
+
+  createdAt DateTime @default(now())
+
+  @@index([studioId, createdAt])
+  @@index([entityType, entityId])
+}
+
+// ---------------------------------------------------------------------------
+// Contracts, moodboards & lead page
+// ---------------------------------------------------------------------------
+
+enum ContractStatus {
+  DRAFT
+  SENT
+  SIGNED
+  DECLINED
+}
+
+model Contract {
+  id       String @id @default(cuid())
+  studioId String
+  studio   Studio @relation(fields: [studioId], references: [id], onDelete: Cascade)
+
+  projectId String  @unique
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  title  String
+  body   String
+  status ContractStatus @default(DRAFT)
+
+  sentAt     DateTime?
+  signedAt   DateTime?
+  declinedAt DateTime?
+
+  // Typed-name signature captured from the client portal.
+  signerName String?
+  signerIp   String?
+
+  shareToken String @unique @default(cuid())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([studioId])
+}
+
+model MoodboardItem {
+  id       String @id @default(cuid())
+  studioId String
+  studio   Studio @relation(fields: [studioId], references: [id], onDelete: Cascade)
+
+  projectId String
+  project   Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  // Either an uploaded/linked image or a plain reference link.
+  imageUrl  String?
+  linkUrl   String?
+  caption   String?
+  sortOrder Int     @default(0)
+
+  createdAt DateTime @default(now())
+
+  @@index([studioId])
+  @@index([projectId])
+}
+
+model LeadPageView {
+  id       String @id @default(cuid())
+  studioId String
+  studio   Studio @relation(fields: [studioId], references: [id], onDelete: Cascade)
+
+  // Null referrer means the link was opened directly.
+  referrer  String?
+  submitted Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@index([studioId, createdAt])
+}
